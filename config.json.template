@@ -1,0 +1,35 @@
+{
+    "email": {
+        "from": "your-email@gmail.com",
+        "to": [
+            "your-phone@carrier-gateway.com",
+            "backup@email.com"
+        ],
+        "smtp_server": "smtp.gmail.com",
+        "username": "your-email@gmail.com",
+        "password": "your-gmail-app-password"
+    },
+    "discord_webhook": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "pushover": {
+        "app_token": "YOUR_PUSHOVER_APP_TOKEN",
+        "user_key": "YOUR_PUSHOVER_USER_KEY"
+    },
+    "use_selenium": false,
+    "check_interval": 30,
+    "timeout": 15,
+    "alert_cooldown": 300,
+    
+    "_comments": {
+        "email_setup": "Get Gmail App Password: Google Account > Security > 2-Step Verification > App passwords",
+        "uk_sms_gateways": {
+            "o2": "447123456789@email.o2.co.uk",
+            "ee": "447123456789@mms.ee.co.uk", 
+            "three": "447123456789@email.three.co.uk",
+            "vodafone": "447123456789@vodafone.net"
+        },
+        "discord_webhook": "Server Settings > Integrations > Webhooks > Create Webhook",
+        "pushover": "Sign up at pushover.net, create app ($5 one-time), get tokens",
+        "selenium": "Set to false for more reliable monitoring (HTTP-only)",
+        "intervals": "check_interval: seconds between checks, alert_cooldown: seconds between duplicate alerts"
+    }
+}

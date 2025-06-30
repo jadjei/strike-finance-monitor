@@ -1,0 +1,152 @@
+# Strike Finance Monitor .gitignore
+
+# Configuration files with sensitive data
+config.json
+*.json
+!config.json.template
+!podman-compose.yml
+!package.json
+
+# Runtime data and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# Debug output files
+debug_screenshot_*
+debug_source_*
+debug_report_*
+screenshots/
+dumps/
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Container/Podman
+.containerignore
+podman-compose.override.yml
+docker-compose.override.yml
+volumes/
+container-data/
+
+# Credentials and secrets
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+secrets/
+.env*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.bkp
+*.backup
+*.orig
+.cache/
+.pytest_cache/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.directory
+.Trash-*
+
+# Browser and driver files
+chromedriver*
+geckodriver*
+*.crx
+
+# Cleanup reports
+cleanup_report_*
+*.cleanup.log
+
+# Cron job backups
+crontab.bak
+*.crontab
+
+# SSL certificates
+*.crt
+*.cert
+*.ca-bundle
+
+# Archive files
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Coverage and testing
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Python version managers
+.python-version
+Pipfile.lock
+poetry.lock
+
+# Development directories
+local/
+dev/
+testing/
+
+# Documentation build
+docs/_build/
+site/
+
+# Systemd service files (if customized locally)
+*.service.local

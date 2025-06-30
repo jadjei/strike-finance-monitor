@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  strike-monitor:
+    build: .
+    container_name: strike-finance-monitor
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # Persist logs and debug files (no config mount needed)
+      - strike-logs:/app/logs
+      - strike-db:/app/db
+    environment:
+      - TZ=Europe/London
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN  # For network access
+    read_only: false  # Needs write access for logs/db
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+volumes:
+  strike-logs:
+    driver: local
+  strike-db:
+    driver: local

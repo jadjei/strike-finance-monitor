@@ -1,0 +1,24 @@
+# Core monitoring dependencies
+requests>=2.31.0
+aiohttp>=3.8.5
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
+
+# Selenium for JavaScript-rendered content
+selenium>=4.15.0
+
+# Scheduling and environment
+schedule>=1.2.0
+python-dotenv>=1.0.0
+
+# Optional: Enhanced notifications (install only if needed)
+# python-pushover>=0.4  # Correct package name for Pushover
+# python-telegram-bot>=20.5  # If using Telegram
+# discord.py>=2.3.0  # Alternative Discord library
+
+# Optional: Monitoring and health checks
+# psutil>=5.9.5  # System monitoring
+# watchdog>=3.0.0  # File system monitoring
+
+# Note: sqlite3 and asyncio are built into Python 3.7+
+flask>=3.1.0
