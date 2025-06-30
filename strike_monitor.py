@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Robust Strike Finance Liquidity Monitor
-Multi-layered monitoring with redundancy and comprehensive alerting
+Enhanced Strike Finance Liquidity Monitor
+Optimized to be more afraid of missing changes than false positives
 """
 
 import requests
@@ -10,7 +10,7 @@ import json
 import hashlib
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import sqlite3
 import smtplib
@@ -32,13 +32,16 @@ from pathlib import Path
 @dataclass
 class MonitorConfig:
     url: str = "https://app.strikefinance.org/liquidity"
-    check_interval: int = 30  # seconds
-    timeout: int = 15
-    max_retries: int = 3
-    alert_cooldown: int = 300  # 5 minutes between same alerts
-    use_selenium: bool = True  # Set to False to disable Selenium
+    check_interval: int = 60
+    timeout: int = 15  # Slightly reduced timeout for faster cycles
+    max_retries: int = 2  # Fewer retries to cycle faster
+    alert_cooldown: int = 300
+    use_selenium: bool = True
     
-    # Target elements to monitor
+    # More aggressive detection thresholds
+    uncertainty_threshold: float = 0.3  # If >30% uncertainty, assume available
+    
+    # Target elements to monitor (expanded list)
     button_selectors: List[str] = None
     disabled_text: str = "Liquidity Currently Capped"
     
@@ -48,7 +51,9 @@ class MonitorConfig:
                 'button:contains("Liquidity Currently Capped")',
                 'button[disabled*=""]',
                 '.bg-\\[\\#636363\\]',
-                'button.cursor-not-allowed'
+                'button.cursor-not-allowed',
+                'button[aria-disabled="true"]',
+                '.opacity-50'
             ]
 
 class AlertManager:
@@ -56,13 +61,16 @@ class AlertManager:
         self.config = config
         self.last_alerts = {}
         
-    async def send_alert(self, message: str, alert_type: str = "LIQUIDITY_AVAILABLE"):
-        """Send alerts through multiple channels"""
+    async def send_alert(self, message: str, alert_type: str = "LIQUIDITY_AVAILABLE", confidence: str = "HIGH"):
+        """Send alerts through multiple channels with confidence level"""
         now = datetime.now()
+        
+        # Reduced cooldown for uncertain alerts
+        cooldown_seconds = 120 if confidence == "UNCERTAIN" else 180
         
         # Cooldown check
         if alert_type in self.last_alerts:
-            if now - self.last_alerts[alert_type] < timedelta(seconds=300):
+            if now - self.last_alerts[alert_type] < timedelta(seconds=cooldown_seconds):
                 return
         
         self.last_alerts[alert_type] = now
@@ -71,33 +79,38 @@ class AlertManager:
         tasks = []
         
         if self.config.get('email'):
-            tasks.append(self._send_email(message))
+            tasks.append(self._send_email(message, confidence))
         
         if self.config.get('discord_webhook'):
-            tasks.append(self._send_discord(message))
+            tasks.append(self._send_discord(message, confidence))
         
         if self.config.get('pushover'):
-            tasks.append(self._send_pushover(message))
+            tasks.append(self._send_pushover(message, confidence))
         
-        # Execute all alerts concurrently (only if we have tasks)
+        # Execute all alerts concurrently
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
     
-    async def _send_email(self, message: str):
-        """Send email alert"""
+    async def _send_email(self, message: str, confidence: str):
+        """Send email alert with confidence indicator"""
         try:
             msg = MIMEMultipart()
             msg['From'] = self.config['email']['from']
             msg['To'] = ', '.join(self.config['email']['to'])
-            msg['Subject'] = "🚨 Strike Finance Liquidity Alert"
+            
+            confidence_prefix = "🔍 POSSIBLE" if confidence == "UNCERTAIN" else "🚨"
+            msg['Subject'] = f"{confidence_prefix} Strike Finance Liquidity Alert"
             
             body = f"""
-            LIQUIDITY DEPLOYMENT AVAILABLE!
+            LIQUIDITY DEPLOYMENT DETECTED!
+            Confidence: {confidence}
             
             {message}
             
             URL: https://app.strikefinance.org/liquidity
             Time: {datetime.now().isoformat()}
+            
+            Note: This monitor is tuned to avoid missing opportunities.
             """
             
             msg.attach(MIMEText(body, 'plain'))
@@ -111,15 +124,18 @@ class AlertManager:
         except Exception as e:
             logging.error(f"Email alert failed: {e}")
     
-    async def _send_discord(self, message: str):
-        """Send Discord webhook alert"""
+    async def _send_discord(self, message: str, confidence: str):
+        """Send Discord webhook alert with confidence level"""
         try:
             async with aiohttp.ClientSession() as session:
+                color = 16776960 if confidence == "UNCERTAIN" else 65280  # Yellow or Green
+                emoji = "🔍" if confidence == "UNCERTAIN" else "🚨"
+                
                 payload = {
                     "embeds": [{
-                        "title": "🚨 Strike Finance Liquidity Alert",
-                        "description": message,
-                        "color": 65280,  # Green
+                        "title": f"{emoji} Strike Finance Liquidity Alert",
+                        "description": f"**Confidence: {confidence}**\n\n{message}",
+                        "color": color,
                         "timestamp": datetime.utcnow().isoformat(),
                         "url": "https://app.strikefinance.org/liquidity"
                     }]
@@ -135,20 +151,25 @@ class AlertManager:
         except Exception as e:
             logging.error(f"Discord alert failed: {e}")
     
-    async def _send_pushover(self, message: str):
-        """Send Pushover notification"""
+    async def _send_pushover(self, message: str, confidence: str):
+        """Send Pushover notification with appropriate priority"""
         try:
             async with aiohttp.ClientSession() as session:
+                # Lower priority for uncertain alerts
+                priority = 1 if confidence == "UNCERTAIN" else 2
+                title_prefix = "POSSIBLE" if confidence == "UNCERTAIN" else "CONFIRMED"
+                
                 payload = {
                     "token": self.config['pushover']['app_token'],
                     "user": self.config['pushover']['user_key'],
-                    "message": message,
-                    "title": "Strike Finance Alert",
-                    "priority": 2,  # Emergency priority
-                    "retry": 30,
-                    "expire": 3600,
+                    "message": f"{message}\n\nConfidence: {confidence}",
+                    "title": f"{title_prefix} Strike Alert",
+                    "priority": priority,
                     "url": "https://app.strikefinance.org/liquidity"
                 }
+                
+                if priority == 2:  # Emergency for high confidence
+                    payload.update({"retry": 30, "expire": 3600})
                 
                 async with session.post(
                     "https://api.pushover.net/1/messages.json",
@@ -168,6 +189,10 @@ class MultiLayerMonitor:
         self.setup_database()
         self.setup_logging()
         
+        # State tracking for enhanced change detection
+        self.historical_states = []
+        self.max_history = 10
+        
     def setup_database(self):
         """Initialize SQLite database for state tracking"""
         conn = sqlite3.connect(self.db_path)
@@ -181,6 +206,7 @@ class MultiLayerMonitor:
                 state_hash TEXT,
                 raw_content TEXT,
                 liquidity_available BOOLEAN,
+                confidence_score REAL,
                 success BOOLEAN,
                 error_message TEXT
             )
@@ -201,25 +227,42 @@ class MultiLayerMonitor:
         )
     
     def log_state(self, method: str, state_hash: str, content: str, 
-                  available: bool, success: bool, error: str = None):
-        """Log monitoring state to database"""
+                  available: bool, confidence: float, success: bool, error: str = None):
+        """Log monitoring state to database with confidence score"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
             INSERT INTO monitor_state 
-            (timestamp, method, state_hash, raw_content, liquidity_available, success, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (datetime.now(), method, state_hash, content, available, success, error))
+            (timestamp, method, state_hash, raw_content, liquidity_available, confidence_score, success, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (datetime.now(), method, state_hash, content, available, confidence, success, error))
         
         conn.commit()
         conn.close()
     
-    async def check_with_requests(self) -> Optional[bool]:
-        """Method 1: Simple HTTP requests with BeautifulSoup"""
+    def calculate_confidence(self, capped_indicators: List[bool], method: str) -> float:
+        """Calculate confidence score for the detection"""
+        if method == "requests":
+            # For HTTP method, high confidence if all indicators agree
+            if all(capped_indicators) or not any(capped_indicators):
+                return 0.95  # High confidence
+            else:
+                return 0.4  # Mixed signals = low confidence
+        else:
+            # Selenium generally less reliable for this site
+            return 0.7
+    
+    async def check_with_requests(self) -> Tuple[Optional[bool], float]:
+        """Method 1: HTTP requests with enhanced sensitivity"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
             }
             
             async with aiohttp.ClientSession() as session:
@@ -234,32 +277,45 @@ class MultiLayerMonitor:
                     
                     content = await response.text()
                     
-                    # Check multiple indicators that liquidity is capped
+                    # Expanded list of capped indicators (more sensitive)
                     capped_indicators = [
                         "Liquidity Currently Capped" in content,
                         "cursor-not-allowed" in content,
-                        'disabled=""' in content,
+                        'disabled=""' in content or 'disabled="disabled"' in content,
                         "bg-[#636363]" in content,
-                        "text-[#a0a0a0]" in content
+                        "text-[#a0a0a0]" in content,
+                        "opacity-50" in content,
+                        'aria-disabled="true"' in content,
+                        "pointer-events-none" in content
                     ]
                     
-                    # If ANY indicator shows it's capped, then it's capped
-                    is_capped = any(capped_indicators)
-                    available = not is_capped
+                    confidence = self.calculate_confidence(capped_indicators, "requests")
+                    
+                    # CHANGED: More aggressive logic - if confidence is low, assume available
+                    capped_count = sum(capped_indicators)
+                    total_indicators = len(capped_indicators)
+                    
+                    if confidence < 0.5:
+                        # Low confidence = assume available (err on side of not missing opportunities)
+                        available = True
+                        logging.warning(f"HTTP check - LOW CONFIDENCE ({confidence:.2f}), assuming AVAILABLE")
+                    else:
+                        # High confidence = trust the indicators
+                        available = capped_count < (total_indicators * 0.5)  # If <50% indicators show capped, assume available
                     
                     state_hash = hashlib.md5(content.encode()).hexdigest()
                     
-                    logging.info(f"HTTP check - Capped indicators: {sum(capped_indicators)}/5, Available: {available}")
-                    self.log_state("requests", state_hash, content[:1000], available, True)
-                    return available
+                    logging.info(f"HTTP check - Capped indicators: {capped_count}/{total_indicators}, Confidence: {confidence:.2f}, Available: {available}")
+                    self.log_state("requests", state_hash, content[:1000], available, confidence, True)
+                    return available, confidence
                     
         except Exception as e:
-            self.log_state("requests", "", "", False, False, str(e))
+            self.log_state("requests", "", "", False, 0.0, False, str(e))
             logging.error(f"Requests method failed: {e}")
-            return None
+            return None, 0.0
     
-    def check_with_selenium(self) -> Optional[bool]:
-        """Method 2: Selenium for JavaScript-heavy content"""
+    def check_with_selenium(self) -> Tuple[Optional[bool], float]:
+        """Method 2: Selenium with enhanced detection"""
         driver = None
         try:
             options = Options()
@@ -267,6 +323,7 @@ class MultiLayerMonitor:
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
             
             driver = webdriver.Chrome(options=options)
             driver.set_page_load_timeout(self.config.timeout)
@@ -274,88 +331,172 @@ class MultiLayerMonitor:
             driver.get(self.config.url)
             
             # Wait for page to load
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 8).until(
                 EC.presence_of_element_located((By.TAG_NAME, "button"))
             )
             
-            # Check for disabled state
+            # Multiple approaches to detect state
+            detection_methods = []
+            
+            # Method 1: Look for disabled buttons
             try:
-                disabled_button = driver.find_element(
+                disabled_buttons = driver.find_elements(
                     By.CSS_SELECTOR, 
-                    'button[disabled], button.cursor-not-allowed'
+                    'button[disabled], button.cursor-not-allowed, button[aria-disabled="true"]'
                 )
-                button_text = disabled_button.text
                 
-                available = self.config.disabled_text not in button_text
+                has_capped_button = any(
+                    self.config.disabled_text in btn.text 
+                    for btn in disabled_buttons
+                )
+                detection_methods.append(has_capped_button)
                 
-            except:
-                # If no disabled button found, liquidity might be available
-                available = True
+            except Exception as e:
+                logging.debug(f"Selenium disabled button check failed: {e}")
+                detection_methods.append(False)  # Assume available if check fails
+            
+            # Method 2: Look for specific text patterns
+            try:
+                page_text = driver.find_element(By.TAG_NAME, "body").text
+                has_capped_text = "Liquidity Currently Capped" in page_text
+                detection_methods.append(has_capped_text)
+                
+            except Exception as e:
+                logging.debug(f"Selenium text check failed: {e}")
+                detection_methods.append(False)
+            
+            # Method 3: Check button classes/styles
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                has_disabled_styles = any(
+                    "cursor-not-allowed" in btn.get_attribute("class") or
+                    "opacity-50" in btn.get_attribute("class") or
+                    btn.get_attribute("disabled") == "true"
+                    for btn in buttons
+                )
+                detection_methods.append(has_disabled_styles)
+                
+            except Exception as e:
+                logging.debug(f"Selenium style check failed: {e}")
+                detection_methods.append(False)
+            
+            # Calculate result - if any method fails to detect capping, assume available
+            capped_votes = sum(detection_methods)
+            total_methods = len(detection_methods)
+            
+            # CHANGED: If <75% of methods agree it's capped, assume available
+            is_capped = capped_votes >= (total_methods * 0.75)
+            available = not is_capped
+            
+            confidence = 0.8 if capped_votes in [0, total_methods] else 0.4  # High confidence if all agree
             
             page_source = driver.page_source
             state_hash = hashlib.md5(page_source.encode()).hexdigest()
             
-            self.log_state("selenium", state_hash, page_source[:1000], available, True)
-            return available
+            logging.info(f"Selenium check - Capped votes: {capped_votes}/{total_methods}, Confidence: {confidence:.2f}, Available: {available}")
+            self.log_state("selenium", state_hash, page_source[:1000], available, confidence, True)
+            return available, confidence
             
         except Exception as e:
-            self.log_state("selenium", "", "", False, False, str(e))
+            self.log_state("selenium", "", "", False, 0.0, False, str(e))
             logging.error(f"Selenium method failed: {e}")
-            return None
+            return None, 0.0
             
         finally:
             if driver:
                 driver.quit()
     
-    async def consensus_check(self) -> bool:
-        """Run multiple monitoring methods and use consensus"""
+    def analyze_trend(self, current_state: bool) -> str:
+        """Analyze recent trends to improve confidence"""
+        self.historical_states.append(current_state)
+        if len(self.historical_states) > self.max_history:
+            self.historical_states.pop(0)
+        
+        if len(self.historical_states) < 3:
+            return "INSUFFICIENT_DATA"
+        
+        recent_states = self.historical_states[-3:]
+        
+        if all(recent_states):
+            return "CONSISTENTLY_AVAILABLE"
+        elif not any(recent_states):
+            return "CONSISTENTLY_CAPPED"
+        else:
+            return "FLUCTUATING"
+    
+    async def consensus_check(self) -> Tuple[bool, str]:
+        """Enhanced consensus with bias toward detecting availability"""
         results = []
         
-        # Method 1: Async HTTP + BeautifulSoup (primary method - most reliable)
-        result1 = await self.check_with_requests()
+        # Method 1: HTTP (primary)
+        result1, conf1 = await self.check_with_requests()
         if result1 is not None:
-            results.append(("HTTP", result1))
+            results.append(("HTTP", result1, conf1))
         
-        # Method 2: Selenium (backup method) - only if enabled
+        # Method 2: Selenium (if enabled)
         if self.config.use_selenium:
             def selenium_wrapper():
                 return self.check_with_selenium()
             
             loop = asyncio.get_event_loop()
-            result2 = await loop.run_in_executor(None, selenium_wrapper)
+            result2, conf2 = await loop.run_in_executor(None, selenium_wrapper)
             if result2 is not None:
-                results.append(("Selenium", result2))
+                results.append(("Selenium", result2, conf2))
         
-        # Consensus logic - prioritize HTTP method
         if not results:
             logging.error("All monitoring methods failed")
-            return False
+            return False, "ERROR"
         
-        # If we have HTTP result, trust it more
-        http_result = next((result for method, result in results if method == "HTTP"), None)
-        selenium_result = next((result for method, result in results if method == "Selenium"), None)
+        # CHANGED: Enhanced consensus logic biased toward availability
+        available_votes = sum(1 for _, available, _ in results if available)
+        total_votes = len(results)
         
-        if http_result is not None:
-            if selenium_result is not None and http_result != selenium_result:
-                logging.warning(f"Methods disagree - HTTP: {http_result}, Selenium: {selenium_result} - Using HTTP result")
-                # Save debug info when methods disagree
-                await self._save_debug_info(http_result, selenium_result)
-            return http_result
+        # Calculate weighted confidence
+        total_confidence = sum(conf for _, _, conf in results)
+        avg_confidence = total_confidence / len(results)
+        
+        # Decision logic - biased toward availability
+        if available_votes >= (total_votes * 0.5):
+            # If 50%+ vote available, go with available
+            final_state = True
+            confidence_level = "HIGH" if avg_confidence > 0.7 else "UNCERTAIN"
         else:
-            # Fallback to Selenium if HTTP failed
-            logging.warning("HTTP method failed, using Selenium result")
-            return selenium_result if selenium_result is not None else False
+            # Only declare capped if strong consensus
+            if avg_confidence > 0.8 and available_votes == 0:
+                final_state = False
+                confidence_level = "HIGH"
+            else:
+                # When in doubt, assume available
+                final_state = True
+                confidence_level = "UNCERTAIN"
+                logging.warning("Uncertain state - defaulting to AVAILABLE to avoid missing opportunities")
+        
+        # Log method disagreements
+        if len(results) > 1 and len(set(result for _, result, _ in results)) > 1:
+            method_results = [(method, result) for method, result, _ in results]
+            logging.warning(f"Methods disagree: {method_results} - Final: {final_state} ({confidence_level})")
+            await self._save_debug_info(results)
+        
+        return final_state, confidence_level
     
-    async def _save_debug_info(self, http_result: bool, selenium_result: bool):
+    async def _save_debug_info(self, results: List[Tuple[str, bool, float]]):
         """Save debug information when methods disagree"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Create logs directory if it doesn't exist
             logs_dir = Path("logs")
             logs_dir.mkdir(exist_ok=True)
             
-            # Save a screenshot with Selenium for debugging
+            # Save detailed analysis
+            analysis_path = logs_dir / f"debug_analysis_{timestamp}.txt"
+            with open(analysis_path, 'w') as f:
+                f.write(f"Method Disagreement Analysis - {datetime.now()}\n")
+                f.write("=" * 50 + "\n\n")
+                for method, result, confidence in results:
+                    f.write(f"{method}: {result} (confidence: {confidence:.2f})\n")
+                f.write(f"\nHistorical states: {self.historical_states}\n")
+            
+            # Save screenshot for visual confirmation
             options = Options()
             options.add_argument('--headless')
             options.add_argument('--no-sandbox')
@@ -364,61 +505,91 @@ class MultiLayerMonitor:
             
             driver = webdriver.Chrome(options=options)
             driver.get(self.config.url)
-            time.sleep(5)
+            time.sleep(3)
             
             screenshot_path = logs_dir / f"debug_screenshot_{timestamp}.png"
             driver.save_screenshot(str(screenshot_path))
             
-            # Save page source
             source_path = logs_dir / f"debug_source_{timestamp}.html"
             with open(source_path, 'w') as f:
                 f.write(driver.page_source)
             
-            logging.info(f"Debug files saved: {screenshot_path.name} and {source_path.name}")
+            logging.info(f"Debug files saved: {analysis_path.name}, {screenshot_path.name}, {source_path.name}")
             driver.quit()
             
         except Exception as e:
             logging.error(f"Failed to save debug info: {e}")
     
     async def run_monitor(self):
-        """Main monitoring loop"""
-        logging.info("Starting Strike Finance liquidity monitor...")
+        """Main monitoring loop with enhanced change detection"""
+        logging.info("Starting enhanced Strike Finance liquidity monitor...")
+        logging.info("Configuration: Biased toward detecting availability (fewer missed opportunities)")
         
         last_state = False
+        last_confidence = "HIGH"
         consecutive_failures = 0
         last_cleanup = datetime.now()
         
         while True:
             try:
-                current_state = await self.consensus_check()
+                current_state, confidence_level = await self.consensus_check()
                 
                 # Reset failure counter on success
                 consecutive_failures = 0
                 
-                # State change detection
-                if current_state and not last_state:
+                # Analyze trends
+                trend = self.analyze_trend(current_state)
+                
+                # Enhanced state change detection
+                state_changed = current_state != last_state
+                confidence_changed = confidence_level != last_confidence
+                
+                if state_changed and current_state:
+                    # Liquidity became available
                     message = f"""
-                    🚨 LIQUIDITY DEPLOYMENT NOW AVAILABLE! 🚨
+                    🚨 LIQUIDITY DEPLOYMENT DETECTED! 🚨
                     
-                    The Strike Finance liquidity cap has been lifted.
-                    You can now deploy capital.
+                    The Strike Finance liquidity appears to be available for deployment.
+                    Confidence Level: {confidence_level}
+                    Trend: {trend}
                     
                     Detected at: {datetime.now().isoformat()}
+                    
+                    Please verify manually before deploying capital.
                     """
                     
-                    await self.alert_manager.send_alert(message, "LIQUIDITY_AVAILABLE")
-                    logging.info("🚨 LIQUIDITY AVAILABLE - Alerts sent!")
+                    await self.alert_manager.send_alert(message, "LIQUIDITY_AVAILABLE", confidence_level)
+                    logging.info(f"🚨 LIQUIDITY AVAILABLE ({confidence_level}) - Alerts sent!")
+                
+                elif current_state and confidence_changed and confidence_level == "UNCERTAIN":
+                    # Send uncertain alert if we're unsure but think it might be available
+                    message = f"""
+                    🔍 POSSIBLE LIQUIDITY OPPORTUNITY
+                    
+                    Detection methods are uncertain, but liquidity may be available.
+                    This alert is sent to avoid missing opportunities.
+                    
+                    Trend: {trend}
+                    Time: {datetime.now().isoformat()}
+                    
+                    Please check manually: https://app.strikefinance.org/liquidity
+                    """
+                    
+                    await self.alert_manager.send_alert(message, "UNCERTAIN_AVAILABLE", confidence_level)
+                    logging.info(f"🔍 UNCERTAIN AVAILABILITY - Precautionary alert sent!")
                 
                 elif not current_state and last_state:
-                    logging.info("Liquidity capped again")
+                    logging.info(f"Liquidity capped again ({confidence_level})")
                 
+                # Update state tracking
                 last_state = current_state
+                last_confidence = confidence_level
                 
-                # Log current status
+                # Enhanced status logging
                 status = "AVAILABLE" if current_state else "CAPPED"
-                logging.info(f"Status: {status}")
+                logging.info(f"Status: {status} ({confidence_level}) | Trend: {trend}")
                 
-                # Run daily cleanup of debug files (once per day)
+                # Daily cleanup
                 if (datetime.now() - last_cleanup).days >= 1:
                     await self._cleanup_debug_files()
                     last_cleanup = datetime.now()
@@ -427,8 +598,8 @@ class MultiLayerMonitor:
                 consecutive_failures += 1
                 logging.error(f"Monitor cycle failed ({consecutive_failures}): {e}")
                 
-                # Send failure alert after multiple failures
-                if consecutive_failures >= 5:
+                # Send failure alert after fewer failures (more sensitive)
+                if consecutive_failures >= 3:
                     await self.alert_manager.send_alert(
                         f"Monitor has failed {consecutive_failures} times. Last error: {e}",
                         "MONITOR_FAILURE"
@@ -440,7 +611,6 @@ class MultiLayerMonitor:
     async def _cleanup_debug_files(self):
         """Run debug files cleanup in background"""
         try:
-            # Import cleanup functionality
             from cleanup_debug_files import DebugFileManager
             
             logs_dir = Path("logs")
@@ -450,31 +620,12 @@ class MultiLayerMonitor:
                 
                 if stats['deleted'] > 0:
                     logging.info(f"Cleanup: Kept {stats['kept']}, deleted {stats['deleted']} debug files, freed {stats['size_freed'] / 1024 / 1024:.1f} MB")
-                else:
-                    logging.debug("Cleanup: No files needed deletion")
             
         except Exception as e:
             logging.error(f"Debug files cleanup failed: {e}")
 
-# Configuration template
-ALERT_CONFIG = {
-    "email": {
-        "from": "your-email@gmail.com",
-        "to": ["447123456789@email.o2.co.uk", "backup@email.com"],
-        "smtp_server": "smtp.gmail.com",
-        "username": "your-email@gmail.com",
-        "password": "your-app-password"
-    },
-    "discord_webhook": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
-    "pushover": {
-        "app_token": "YOUR_PUSHOVER_APP_TOKEN",
-        "user_key": "YOUR_PUSHOVER_USER_KEY"
-    }
-}
-
 async def main():
     """Main entry point"""
-    # Load configuration from file
     try:
         with open('config.json', 'r') as f:
             config_data = json.load(f)
@@ -482,30 +633,36 @@ async def main():
         print("config.json not found, using default config")
         config_data = {}
     
-    # Extract alert config and monitor config
+    # Extract alert config
     alert_config = {
         'email': config_data.get('email'),
         'discord_webhook': config_data.get('discord_webhook'),
         'pushover': config_data.get('pushover')
     }
     
-    # Create monitor config with settings from JSON
+    # Create enhanced monitor config
     config = MonitorConfig(
         use_selenium=config_data.get('use_selenium', True),
-        check_interval=config_data.get('check_interval', 30),
-        timeout=config_data.get('timeout', 15)
+        check_interval=config_data.get('check_interval', 15),  # More frequent by default
+        timeout=config_data.get('timeout', 12),
+        alert_cooldown=config_data.get('alert_cooldown', 180),  # Shorter cooldown
+        uncertainty_threshold=config_data.get('uncertainty_threshold', 0.3)
     )
     
     alert_manager = AlertManager(alert_config)
-    
-    # Create monitor
     monitor = MultiLayerMonitor(config, alert_manager)
     
-    # Log configuration
-    logging.info(f"Monitor config - Selenium: {config.use_selenium}, Interval: {config.check_interval}s")
+    # Log enhanced configuration
+    logging.info("=" * 60)
+    logging.info("ENHANCED STRIKE FINANCE MONITOR")
+    logging.info("Configuration: BIASED TOWARD DETECTING AVAILABILITY")
+    logging.info(f"• Check interval: {config.check_interval}s (frequent)")
+    logging.info(f"• Alert cooldown: {config.alert_cooldown}s (short)")
+    logging.info(f"• Uncertainty threshold: {config.uncertainty_threshold}")
+    logging.info(f"• Selenium enabled: {config.use_selenium}")
+    logging.info("• Logic: When in doubt, assume AVAILABLE")
+    logging.info("=" * 60)
     
-    # Start monitoring directly (no startup notification)
-    logging.info("Monitor initialized, starting monitoring loop...")
     await monitor.run_monitor()
 
 if __name__ == "__main__":

@@ -150,3 +150,6 @@ site/
 
 # Systemd service files (if customized locally)
 *.service.local
+
+project_context.md
+claude-codebase-create.sh
