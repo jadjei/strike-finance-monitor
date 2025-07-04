@@ -14,22 +14,13 @@
         "app_token": "YOUR_PUSHOVER_APP_TOKEN",
         "user_key": "YOUR_PUSHOVER_USER_KEY"
     },
-    "use_selenium": false,
-    "check_interval": 30,
+    "use_selenium": true,
+    "check_interval": 60,
     "timeout": 15,
-    "alert_cooldown": 300,
+    "alert_cooldown": 180,
     
     "_comments": {
-        "email_setup": "Get Gmail App Password: Google Account > Security > 2-Step Verification > App passwords",
-        "uk_sms_gateways": {
-            "o2": "447123456789@email.o2.co.uk",
-            "ee": "447123456789@mms.ee.co.uk", 
-            "three": "447123456789@email.three.co.uk",
-            "vodafone": "447123456789@vodafone.net"
-        },
-        "discord_webhook": "Server Settings > Integrations > Webhooks > Create Webhook",
-        "pushover": "Sign up at pushover.net, create app ($5 one-time), get tokens",
-        "selenium": "Set to false for more reliable monitoring (HTTP-only)",
-        "intervals": "check_interval: seconds between checks, alert_cooldown: seconds between duplicate alerts"
+        "changes": "Set check_interval to 60s to be respectful to server, alert_cooldown to 180s",
+        "sensitivity": "Monitor now biases toward availability alerts to avoid false negatives"
     }
 }
