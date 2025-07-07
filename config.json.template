@@ -14,13 +14,7 @@
         "app_token": "YOUR_PUSHOVER_APP_TOKEN",
         "user_key": "YOUR_PUSHOVER_USER_KEY"
     },
-    "use_selenium": true,
     "check_interval": 60,
     "timeout": 15,
-    "alert_cooldown": 180,
-    
-    "_comments": {
-        "changes": "Set check_interval to 60s to be respectful to server, alert_cooldown to 180s",
-        "sensitivity": "Monitor now biases toward availability alerts to avoid false negatives"
-    }
+    "alert_cooldown": 180
 }
