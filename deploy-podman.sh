@@ -78,12 +78,11 @@ deploy_container() {
     podman volume create strike-logs 2>/dev/null || true
     podman volume create strike-db 2>/dev/null || true
     
-    # Run container with current config
+    # Run container (config will be created inside container)
     podman run -d \
         --name ${CONTAINER_NAME} \
         --restart unless-stopped \
         -p ${PORT}:5000 \
-        -v $(pwd)/config.json:/app/config.json:ro \
         -v strike-logs:/app/logs \
         -v strike-db:/app/db \
         -e TZ=Europe/London \
@@ -169,9 +168,12 @@ show_completion() {
     echo "  Start: systemctl --user start strike-monitor"
     echo ""
     echo -e "${YELLOW}⚠️  Next Steps:${NC}"
-    echo "  1. Edit config.json with your credentials"
-    echo "  2. Restart: podman restart ${CONTAINER_NAME}"
-    echo "  3. Access dashboard: http://${server_ip}:${PORT}"
+    echo "  1. Copy your config into the container:"
+    echo "     podman cp config.json ${CONTAINER_NAME}:/app/config.json"
+    echo "  2. Or edit config inside container:"
+    echo "     podman exec -it ${CONTAINER_NAME} nano /app/config.json"
+    echo "  3. Restart: podman restart ${CONTAINER_NAME}"
+    echo "  4. Access dashboard: http://${server_ip}:${PORT}"
 }
 
 # Main execution
@@ -180,8 +182,8 @@ main() {
     echo "╔════════════════════════════════════════════════╗"
     echo "║     Strike Finance Monitor - Simple Deploy     ║"
     echo "║                                                ║"
-    echo "║  • Single HTTP check for liquidity status     ║"
-    echo "║  • Multi-channel alerts (Email/Discord/Push)  ║"
+    echo "║  • Single HTTP check for liquidity status      ║"
+    echo "║  • Multi-channel alerts (Email/Discord/Push)   ║"
     echo "║  • Web dashboard for monitoring                ║"
     echo "║  • Rootless container deployment               ║"
     echo "╚════════════════════════════════════════════════╝"

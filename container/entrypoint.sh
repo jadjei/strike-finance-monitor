@@ -3,11 +3,18 @@ set -e
 
 echo "🚀 Starting Strike Finance Monitor..."
 
-# Create config.json if it doesn't exist
-if [[ ! -f /app/config.json ]]; then
+# Create config.json if it doesn't exist or if mounted file has permission issues
+if [[ ! -f /app/config.json ]] || [[ ! -r /app/config.json ]]; then
     echo "📝 Creating config.json from template..."
     cp /app/config.json.template /app/config.json
+    chmod 644 /app/config.json
     echo "⚠️  Edit config.json with your credentials!"
+fi
+
+# Ensure config.json is readable
+if [[ ! -r /app/config.json ]]; then
+    echo "⚠️  Fixing config.json permissions..."
+    chmod 644 /app/config.json
 fi
 
 # Create necessary directories
